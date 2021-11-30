@@ -2,9 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:video_compress/video_compress.dart';
 import 'package:file_selector/file_selector.dart';
+import 'package:video_player/video_player.dart';
 import 'dart:io';
-
-import './video_thumbnail.dart';
 
 void main() {
   runApp(MyApp());
@@ -33,7 +32,12 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> {
-  String _counter = "video";
+  MediaInfo? info;
+
+  File? _videoFile;
+  File? _thumbnailFile;
+
+  VideoPlayerController? _controller;
 
   _compressVideo() async {
     var file;
@@ -42,61 +46,78 @@ class _MyHomePageState extends State<MyHomePage> {
       file = await openFile(acceptedTypeGroups: [typeGroup]);
     } else {
       final picker = ImagePicker();
-      PickedFile? pickedFile = await picker.getVideo(source: ImageSource.gallery);
+      PickedFile? pickedFile = await picker.getVideo(
+        source: ImageSource.camera,
+        maxDuration: Duration(seconds: 10),
+      );
       file = File(pickedFile!.path);
     }
     if (file == null) {
       return;
     }
     await VideoCompress.setLogLevel(0);
-    final MediaInfo? info = await VideoCompress.compressVideo(
+    info = await VideoCompress.compressVideo(
       file.path,
       quality: VideoQuality.MediumQuality,
+      startTime: 0,
+      duration: 10,
       deleteOrigin: false,
       includeAudio: true,
     );
-    print(info!.path);
-    if (info != null) {
-      setState(() {
-        _counter = info.path!;
-      });
+    if (info == null) {
+      return;
     }
+    _thumbnailFile = await VideoCompress.getFileThumbnail(file.path);
+    print('path: ${info!.path}, size: ${info!.filesize}');
+    print(info.toString());
+    _videoFile = info!.file;
+    if (_videoFile == null) {
+      return;
+    }
+    setState(() {});
+    _controller = VideoPlayerController.file(_videoFile!)
+      ..initialize().then((_) {
+        // Ensure the first frame is shown after the video is initialized,
+        // even before the play button has been pressed.
+        if (mounted) {
+          setState(() {});
+          _controller?.play();
+        }
+      });
+  }
+
+  @override
+  void dispose() {
+    _controller?.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.title!),
-      ),
+      appBar: AppBar(),
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: <Widget>[
-            Text(
-              'You have pushed the button this many times:',
+            SizedBox(
+              height: 500,
+              child: _controller != null && _controller!.value.isInitialized
+                  ? AspectRatio(
+                      aspectRatio: _controller!.value.aspectRatio,
+                      child: VideoPlayer(_controller!),
+                    )
+                  : _thumbnailFile != null
+                      ? Image.file(_thumbnailFile!)
+                      : const SizedBox(),
             ),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headline4,
-            ),
-            InkWell(
-                child: Icon(
-                  Icons.cancel,
-                  size: 55,
-                ),
-                onTap: () {
-                  VideoCompress.cancelCompression();
-                }),
-            ElevatedButton(
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => VideoThumbnail()),
-                );
-              },
-              child: Text('Test thumbnail'),
-            ),
+            const SizedBox(height: 20),
+            if (info != null) ...[
+              Text('path: ${info!.file}'),
+              Text('size: ${info!.filesize}'),
+              Text('width: ${info!.width}, height: ${info!.height}'),
+              Text('duration: ${info!.duration}'),
+            ]
           ],
         ),
       ),
